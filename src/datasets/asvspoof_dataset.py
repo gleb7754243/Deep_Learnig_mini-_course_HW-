@@ -38,10 +38,13 @@ class ASVSpoofDataset(BaseDataset):
         win_length=400,
         hop_length=160,
         max_frames=600,
+        random_crop=True,
+        max_items_per_label=None,
         *args,
         **kwargs,
     ):
         self.data_root = Path(data_root)
+
         if not self.data_root.is_absolute():
             self.data_root = ROOT_PATH / self.data_root
 
@@ -51,9 +54,14 @@ class ASVSpoofDataset(BaseDataset):
         self.win_length = win_length
         self.hop_length = hop_length
         self.max_frames = max_frames
+        self.random_crop = random_crop
+        self.max_items_per_label = max_items_per_label
 
         if self.part not in self.PROTOCOL_FILES:
-            raise ValueError(f"Unknown part: {self.part}. Expected one of {list(self.PROTOCOL_FILES)}")
+            raise ValueError(
+                f"Unknown part: {self.part}. "
+                f"Expected one of {list(self.PROTOCOL_FILES)}"
+            )
 
         index = self._create_index()
         super().__init__(index, *args, **kwargs)
@@ -73,10 +81,12 @@ class ASVSpoofDataset(BaseDataset):
             raise FileNotFoundError(f"Audio directory not found: {audio_dir}")
 
         index = []
+        label_counts = {0: 0, 1: 0}
 
         with open(protocol_path, "r", encoding="utf-8") as file:
             for line in file:
                 fields = line.strip().split()
+
                 if not fields:
                     continue
 
@@ -91,6 +101,10 @@ class ASVSpoofDataset(BaseDataset):
                 else:
                     label = -1
 
+                if self.max_items_per_label is not None and label in label_counts:
+                    if label_counts[label] >= self.max_items_per_label:
+                        continue
+
                 audio_path = audio_dir / f"{utterance_id}.flac"
 
                 if not audio_path.exists():
@@ -104,6 +118,15 @@ class ASVSpoofDataset(BaseDataset):
                         "utterance_id": utterance_id,
                     }
                 )
+
+                if self.max_items_per_label is not None and label in label_counts:
+                    label_counts[label] += 1
+
+                    if all(
+                        count >= self.max_items_per_label
+                        for count in label_counts.values()
+                    ):
+                        break
 
         return index
 
@@ -153,7 +176,9 @@ class ASVSpoofDataset(BaseDataset):
         spectrogram = torch.log1p(spectrogram.abs().pow(2))
         spectrogram = self._fix_time_length(spectrogram)
 
-        spectrogram = (spectrogram - spectrogram.mean()) / (spectrogram.std() + 1e-6)
+        spectrogram = (spectrogram - spectrogram.mean()) / (
+            spectrogram.std() + 1e-6
+        )
 
         return spectrogram.unsqueeze(0).float()
 
@@ -164,7 +189,7 @@ class ASVSpoofDataset(BaseDataset):
             return spectrogram
 
         if current_frames > self.max_frames:
-            if self.part == "train":
+            if self.part == "train" and self.random_crop:
                 start = torch.randint(
                     low=0,
                     high=current_frames - self.max_frames + 1,
