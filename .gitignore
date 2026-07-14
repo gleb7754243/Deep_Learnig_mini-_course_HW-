@@ -112,3 +112,22 @@ outputs/
 .vscode/
 .idea/
 __MACOSX/
+
+# Local data
+data/
+outputs/
+saved/
+wandb/
+mlruns/
+cometml-runs/
+
+# Model checkpoints
+*.pth
+*.pt
+*.ckpt
+
+# Local IDE / OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
