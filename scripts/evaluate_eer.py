@@ -48,6 +48,32 @@ def load_checkpoint(model, checkpoint_path, device):
     return model
 
 
+def predict_bonafide_scores(model, data_object, device):
+    data_object = data_object.to(device)
+
+    if data_object.dim() == 5:
+        batch_size, num_crops, channels, freq, time = data_object.shape
+        flat_data = data_object.reshape(
+            batch_size * num_crops,
+            channels,
+            freq,
+            time,
+        )
+
+        outputs = model(data_object=flat_data)
+        logits = outputs["logits"]
+        probabilities = torch.softmax(logits, dim=-1)[:, 1]
+        probabilities = probabilities.reshape(batch_size, num_crops)
+
+        return probabilities.mean(dim=1)
+
+    outputs = model(data_object=data_object)
+    logits = outputs["logits"]
+    probabilities = torch.softmax(logits, dim=-1)[:, 1]
+
+    return probabilities
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
@@ -57,6 +83,7 @@ def main():
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--max_items_per_label", type=int, default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--num_crops", type=int, default=1)
     parser.add_argument("--output_csv", default=None)
     args = parser.parse_args()
 
@@ -66,6 +93,7 @@ def main():
         "data_root": args.data_root,
         "part": args.part,
         "random_crop": False,
+        "num_crops": args.num_crops,
     }
 
     if args.max_items_per_label is not None:
@@ -94,14 +122,14 @@ def main():
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc=f"Evaluating {args.part}"):
-            data_object = batch["data_object"].to(device)
+            data_object = batch["data_object"]
             labels = batch["labels"]
 
-            outputs = model(data_object=data_object)
-            logits = outputs["logits"]
-
-            probabilities = torch.softmax(logits, dim=-1)
-            bonafide_scores = probabilities[:, 1].detach().cpu()
+            bonafide_scores = predict_bonafide_scores(
+                model=model,
+                data_object=data_object,
+                device=device,
+            ).detach().cpu()
 
             all_scores.extend(bonafide_scores.tolist())
             all_labels.extend(labels.tolist())
@@ -119,6 +147,7 @@ def main():
         print("Labels are not available, EER was not computed.")
 
     print(f"Processed examples: {len(all_scores)}")
+    print(f"Num crops: {args.num_crops}")
 
     if args.output_csv is not None:
         output_path = Path(args.output_csv)

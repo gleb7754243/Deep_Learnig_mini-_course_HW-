@@ -42,6 +42,7 @@ class ASVSpoofDataset(BaseDataset):
         random_crop=True,
         max_items_per_label=None,
         seed=42,
+        num_crops=1,
         *args,
         **kwargs,
     ):
@@ -59,12 +60,16 @@ class ASVSpoofDataset(BaseDataset):
         self.random_crop = random_crop
         self.max_items_per_label = max_items_per_label
         self.seed = seed
+        self.num_crops = num_crops
 
         if self.part not in self.PROTOCOL_FILES:
             raise ValueError(
                 f"Unknown part: {self.part}. "
                 f"Expected one of {list(self.PROTOCOL_FILES)}"
             )
+
+        if self.num_crops < 1:
+            raise ValueError("num_crops must be >= 1")
 
         index = self._create_index()
         super().__init__(index, *args, **kwargs)
@@ -86,10 +91,6 @@ class ASVSpoofDataset(BaseDataset):
         with open(protocol_path, "r", encoding="utf-8") as file:
             lines = file.readlines()
 
-        # Important:
-        # If we take the first N examples from the protocol, we may get a narrow
-        # subset of spoofing attacks. For balanced subsets we shuffle the protocol
-        # first, then collect max_items_per_label examples for each class.
         if self.max_items_per_label is not None:
             rng = random.Random(self.seed)
             rng.shuffle(lines)
@@ -112,9 +113,6 @@ class ASVSpoofDataset(BaseDataset):
             elif label_text == "spoof":
                 label = 0
             else:
-                # This is a safety fallback. In our Kaggle version labels are
-                # available for train/dev/eval protocols, but we keep -1 for
-                # possible unlabeled inference protocols.
                 label = -1
 
             if self.max_items_per_label is not None and label in label_counts:
@@ -190,13 +188,22 @@ class ASVSpoofDataset(BaseDataset):
         )
 
         spectrogram = torch.log1p(spectrogram.abs().pow(2))
-        spectrogram = self._fix_time_length(spectrogram)
 
-        spectrogram = (spectrogram - spectrogram.mean()) / (
-            spectrogram.std() + 1e-6
+        if self.num_crops == 1:
+            spectrogram = self._fix_time_length(spectrogram)
+            spectrogram = self._normalize_spectrogram(spectrogram)
+            return spectrogram.unsqueeze(0).float()
+
+        crops = self._make_time_crops(spectrogram)
+        crops = torch.stack(
+            [self._normalize_spectrogram(crop) for crop in crops],
+            dim=0,
         )
 
-        return spectrogram.unsqueeze(0).float()
+        return crops.unsqueeze(1).float()
+
+    def _normalize_spectrogram(self, spectrogram):
+        return (spectrogram - spectrogram.mean()) / (spectrogram.std() + 1e-6)
 
     def _fix_time_length(self, spectrogram):
         current_frames = spectrogram.shape[1]
@@ -218,3 +225,29 @@ class ASVSpoofDataset(BaseDataset):
 
         pad_frames = self.max_frames - current_frames
         return F.pad(spectrogram, (0, pad_frames))
+
+    def _make_time_crops(self, spectrogram):
+        current_frames = spectrogram.shape[1]
+
+        if current_frames <= self.max_frames:
+            fixed = self._fix_time_length(spectrogram)
+            return [fixed for _ in range(self.num_crops)]
+
+        max_start = current_frames - self.max_frames
+
+        if self.num_crops == 1:
+            starts = [max_start // 2]
+        else:
+            starts = torch.linspace(
+                0,
+                max_start,
+                steps=self.num_crops,
+            ).long().tolist()
+
+        crops = []
+
+        for start in starts:
+            crop = spectrogram[:, start : start + self.max_frames]
+            crops.append(crop)
+
+        return crops
