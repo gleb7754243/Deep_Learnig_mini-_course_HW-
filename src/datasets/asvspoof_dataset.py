@@ -1,4 +1,5 @@
-﻿from pathlib import Path
+﻿import random
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -40,6 +41,7 @@ class ASVSpoofDataset(BaseDataset):
         max_frames=600,
         random_crop=True,
         max_items_per_label=None,
+        seed=42,
         *args,
         **kwargs,
     ):
@@ -56,6 +58,7 @@ class ASVSpoofDataset(BaseDataset):
         self.max_frames = max_frames
         self.random_crop = random_crop
         self.max_items_per_label = max_items_per_label
+        self.seed = seed
 
         if self.part not in self.PROTOCOL_FILES:
             raise ValueError(
@@ -80,53 +83,66 @@ class ASVSpoofDataset(BaseDataset):
         if not audio_dir.exists():
             raise FileNotFoundError(f"Audio directory not found: {audio_dir}")
 
+        with open(protocol_path, "r", encoding="utf-8") as file:
+            lines = file.readlines()
+
+        # Important:
+        # If we take the first N examples from the protocol, we may get a narrow
+        # subset of spoofing attacks. For balanced subsets we shuffle the protocol
+        # first, then collect max_items_per_label examples for each class.
+        if self.max_items_per_label is not None:
+            rng = random.Random(self.seed)
+            rng.shuffle(lines)
+
         index = []
         label_counts = {0: 0, 1: 0}
 
-        with open(protocol_path, "r", encoding="utf-8") as file:
-            for line in file:
-                fields = line.strip().split()
+        for line in lines:
+            fields = line.strip().split()
 
-                if not fields:
+            if not fields:
+                continue
+
+            speaker_id = fields[0]
+            utterance_id = fields[1]
+            label_text = fields[-1]
+
+            if label_text == "bonafide":
+                label = 1
+            elif label_text == "spoof":
+                label = 0
+            else:
+                # This is a safety fallback. In our Kaggle version labels are
+                # available for train/dev/eval protocols, but we keep -1 for
+                # possible unlabeled inference protocols.
+                label = -1
+
+            if self.max_items_per_label is not None and label in label_counts:
+                if label_counts[label] >= self.max_items_per_label:
                     continue
 
-                speaker_id = fields[0]
-                utterance_id = fields[1]
-                label_text = fields[-1]
+            audio_path = audio_dir / f"{utterance_id}.flac"
 
-                if label_text == "bonafide":
-                    label = 1
-                elif label_text == "spoof":
-                    label = 0
-                else:
-                    label = -1
+            if not audio_path.exists():
+                raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-                if self.max_items_per_label is not None and label in label_counts:
-                    if label_counts[label] >= self.max_items_per_label:
-                        continue
+            index.append(
+                {
+                    "path": str(audio_path),
+                    "label": label,
+                    "speaker_id": speaker_id,
+                    "utterance_id": utterance_id,
+                }
+            )
 
-                audio_path = audio_dir / f"{utterance_id}.flac"
+            if self.max_items_per_label is not None and label in label_counts:
+                label_counts[label] += 1
 
-                if not audio_path.exists():
-                    raise FileNotFoundError(f"Audio file not found: {audio_path}")
-
-                index.append(
-                    {
-                        "path": str(audio_path),
-                        "label": label,
-                        "speaker_id": speaker_id,
-                        "utterance_id": utterance_id,
-                    }
-                )
-
-                if self.max_items_per_label is not None and label in label_counts:
-                    label_counts[label] += 1
-
-                    if all(
-                        count >= self.max_items_per_label
-                        for count in label_counts.values()
-                    ):
-                        break
+                if all(
+                    count >= self.max_items_per_label
+                    for count in label_counts.values()
+                ):
+                    break
 
         return index
 
