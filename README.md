@@ -181,7 +181,7 @@ saved/final_lcnn_weighted_v2/
 
 Experiment tracking includes training and validation losses, accuracy, gradient norm, learning rate and batch-level EER as an auxiliary metric.
 
-W&B project: `asvspoof_lcnn_hw`
+W&B project with training charts: [W&B run dashboard](https://wandb.ai/gopenai7754243-hse-university/asvspoof_lcnn_hw?nw=nwusergopenai7754243)
 
 Batch-level EER during training is only a rough indicator. The final metric is calculated from all scores on the full partition.
 
