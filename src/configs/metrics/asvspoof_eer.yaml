@@ -1,0 +1,23 @@
+﻿device: auto
+
+train:
+  - _target_: src.metrics.ExampleMetric
+    metric:
+      _target_: torchmetrics.classification.MulticlassAccuracy
+      num_classes: 2
+    device: ${metrics.device}
+    name: TRAIN_Accuracy
+
+  - _target_: src.metrics.EERMetric
+    name: TRAIN_EER
+
+inference:
+  - _target_: src.metrics.ExampleMetric
+    metric:
+      _target_: torchmetrics.classification.MulticlassAccuracy
+      num_classes: 2
+    device: ${metrics.device}
+    name: Accuracy
+
+  - _target_: src.metrics.EERMetric
+    name: EER

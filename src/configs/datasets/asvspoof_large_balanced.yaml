@@ -1,0 +1,38 @@
+﻿train:
+  _target_: src.datasets.ASVSpoofDataset
+  data_root: data/raw/LA/LA
+  part: train
+  sample_rate: 16000
+  n_fft: 512
+  win_length: 400
+  hop_length: 160
+  max_frames: 600
+  random_crop: true
+  max_items_per_label: 2500
+  instance_transforms: ${transforms.instance_transforms.train}
+
+val:
+  _target_: src.datasets.ASVSpoofDataset
+  data_root: data/raw/LA/LA
+  part: dev
+  sample_rate: 16000
+  n_fft: 512
+  win_length: 400
+  hop_length: 160
+  max_frames: 600
+  random_crop: false
+  max_items_per_label: 2500
+  instance_transforms: ${transforms.instance_transforms.inference}
+
+test:
+  _target_: src.datasets.ASVSpoofDataset
+  data_root: data/raw/LA/LA
+  part: dev
+  sample_rate: 16000
+  n_fft: 512
+  win_length: 400
+  hop_length: 160
+  max_frames: 600
+  random_crop: false
+  max_items_per_label: 2500
+  instance_transforms: ${transforms.instance_transforms.inference}
